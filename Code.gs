@@ -5,15 +5,15 @@ const TELEGRAM_CHAT = '8489487011';
 const CLAUDE_API_KEY = 'YOUR_CLAUDE_API_KEY';
 
 const CLIENTS = [
-  { name: 'Alkadapo',    accountId: '1976133606187254',  tab: 'Alkadapo',    leadType: 'messaging', niche: 'Kabinet Aluminium Modern' },
   { name: 'KMJ',         accountId: '1550462486370580',  tab: 'KMJ',         leadType: 'messaging', niche: 'Carpentry Murah' },
   { name: 'Evo Decor',   accountId: '338313790757128',   tab: 'Evo Decor',   leadType: 'messaging', niche: 'Kabinet Kayu Solid & Carpentry' },
-  { name: 'MDC',         accountId: '1156797928642221',  tab: 'MDC',         leadType: 'form',      niche: 'Carpentry & Kabinet Dapur' },
-  { name: 'Infine',      accountId: '152985287666415',   tab: 'Infine',      leadType: 'form',      niche: 'Interior Design & Build' },
   { name: 'Sendi Mahir', accountId: '545697943993963',   tab: 'Sendi Mahir', leadType: 'messaging', niche: 'ACP Awning' },
-  { name: 'MNAjwa',      accountId: '2370940763338923',  tab: 'MNAjwa',      leadType: 'messaging', niche: 'Travel Agency (Umrah & Pelancongan)' },
-  { name: 'NRZ Travel',  accountId: '1012708638205954',  tab: 'NRZ Travel',  leadType: 'both',      niche: 'Travel Agency (Umrah & Pelancongan)' },
-  // { name: 'Akar Teras', accountId: '2428423081020215', tab: 'Akar Teras', leadType: 'form', niche: 'SPC Flooring & Wainscoting' },
+  // { name: 'Alkadapo',    accountId: '1976133606187254',  tab: 'Alkadapo',    leadType: 'messaging', niche: 'Kabinet Aluminium Modern' },
+  // { name: 'MDC',         accountId: '1156797928642221',  tab: 'MDC',         leadType: 'form',      niche: 'Carpentry & Kabinet Dapur' },
+  // { name: 'Infine',      accountId: '152985287666415',   tab: 'Infine',      leadType: 'form',      niche: 'Interior Design & Build' },
+  // { name: 'Akar Teras',  accountId: '2428423081020215',  tab: 'AKARTERAS',   leadType: 'both',      niche: 'ACP Flooring (Design & Build)' },
+  // { name: 'MNAjwa',      accountId: '2370940763338923',  tab: 'MNAjwa',      leadType: 'messaging', niche: 'Travel Agency (Umrah & Pelancongan)' },
+  // { name: 'NRZ Travel',  accountId: '1012708638205954',  tab: 'NRZ Travel',  leadType: 'both',      niche: 'Travel Agency (Umrah & Pelancongan)' },
 ];
 
 // --- DATE HELPERS ---
