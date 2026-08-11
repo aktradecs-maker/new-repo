@@ -110,6 +110,28 @@ function get7DayAdData(accountId) {
   return json.data || [];
 }
 
+function getPrevWeekData(accountId, leadType) {
+  const now = new Date();
+  const endDate   = toMYTDateStr(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
+  const startDate = toMYTDateStr(new Date(now.getTime() - 13 * 24 * 60 * 60 * 1000));
+  const url = 'https://graph.facebook.com/v19.0/act_' + accountId + '/insights'
+    + '?fields=campaign_name,spend,actions'
+    + '&level=campaign'
+    + '&time_range=' + encodeURIComponent(JSON.stringify({ since: startDate, until: endDate }))
+    + '&limit=200'
+    + '&access_token=' + ACCESS_TOKEN;
+  const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  const json = JSON.parse(res.getContentText());
+  const data = json.data || [];
+  const leads = extractLeads(data, leadType);
+  const spend = data.reduce((sum, d) => {
+    const name = (d.campaign_name || '').toUpperCase();
+    if (!name.includes('CBO') && !name.includes('ABO')) return sum;
+    return sum + parseFloat(d.spend || 0);
+  }, 0);
+  return { leads, spend, cpl: leads > 0 ? spend / leads : 0 };
+}
+
 // --- WRITE TO SHEET ---
 
 function writeToSheet(tab, row, leads, cpl, spend) {
@@ -135,28 +157,93 @@ function sendTelegram(text) {
 
 // --- CLAUDE INSIGHT ---
 
+function buildAdSummary(adData, leadType) {
+  // Aggregate by ad name across 7 days
+  const adMap = {};
+  (adData || []).forEach(a => {
+    const key = a.ad_name || 'Unknown';
+    if (!adMap[key]) adMap[key] = { spend: 0, leads: 0, impressions: 0, clicks: 0 };
+    adMap[key].spend       += parseFloat(a.spend || 0);
+    adMap[key].leads       += countLeadsFromActions(a.actions, leadType);
+    adMap[key].impressions += parseInt(a.impressions || 0, 10);
+    adMap[key].clicks      += parseInt(a.clicks || 0, 10);
+  });
+  return Object.entries(adMap)
+    .sort((a, b) => b[1].leads - a[1].leads)
+    .slice(0, 8)
+    .map(([name, d]) => {
+      const cpl = d.leads > 0 ? (d.spend / d.leads).toFixed(2) : '-';
+      const ctr = d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : '0';
+      return '  • ' + name + ': ' + d.leads + ' leads | CPL RM' + cpl + ' | Spend RM' + d.spend.toFixed(2) + ' | CTR ' + ctr + '%';
+    }).join('\n');
+}
+
+function getCplAlert(todayCpl, prevWeekCpl) {
+  if (prevWeekCpl === 0 || todayCpl === 0) return '';
+  const ratio = todayCpl / prevWeekCpl;
+  if (ratio >= 2) return '🔴 CPL SPIKE ' + (ratio).toFixed(1) + 'x minggu lepas';
+  if (ratio >= 1.5) return '🟡 CPL naik ' + (ratio).toFixed(1) + 'x minggu lepas';
+  if (ratio <= 0.7) return '🟢 CPL turun ' + ((1 - ratio) * 100).toFixed(0) + '% vs minggu lepas';
+  return '';
+}
+
 function getAllInsights(clientsData) {
   try {
     const prompt = clientsData.map(c => {
-      const ads = c.adData || [];
-      const adSummary = ads.slice(0, 10).map(a => {
-        const leads = countLeadsFromActions(a.actions, c.leadType);
-        return '  - ' + (a.ad_name || 'Unknown') + ': ' + leads + ' leads, RM' + parseFloat(a.spend || 0).toFixed(2) + ' spend';
-      }).join('\n');
-      return 'Client: ' + c.name + '\nNiche: ' + c.niche + '\nLeadType: ' + c.leadType
-        + '\nYesterday: ' + c.leads + ' leads, RM' + c.spend.toFixed(2) + ' spend, CPL RM' + c.cpl.toFixed(2)
-        + '\n7-Day Ad Performance:\n' + (adSummary || '  (no ad data)');
-    }).join('\n\n');
+      const adSummary  = buildAdSummary(c.adData, c.leadType);
+      const prev       = c.prevWeek || { leads: 0, spend: 0, cpl: 0 };
+      const leadsChg   = prev.leads > 0 ? (((c.leads - prev.leads) / prev.leads) * 100).toFixed(0) : 'N/A';
+      const spendChg   = prev.spend > 0 ? (((c.spend - prev.spend) / prev.spend) * 100).toFixed(0) : 'N/A';
+      const cplAlert   = getCplAlert(c.cpl, prev.cpl);
 
-    const systemMsg = 'Kau adalah pakar Facebook Ads untuk niche home improvement dan travel Malaysia. '
-      + 'Berikan insight ringkas dan cadangan kreatif dalam Bahasa Melayu untuk setiap klien. '
-      + 'Fokus pada: kenapa leads tinggi/rendah, creative mana perform, dan apa patut diubah. '
-      + 'Jawab dalam format JSON array: [{"name":"ClientName","insight":"..."}]. '
-      + 'Nama mesti tepat sama dengan nama klien yang diberikan.';
+      return [
+        'CLIENT: ' + c.name,
+        'NICHE: ' + c.niche,
+        'LEAD TYPE: ' + c.leadType,
+        '',
+        '== SEMALAM ==',
+        'Leads: ' + c.leads + (leadsChg !== 'N/A' ? ' (' + (leadsChg > 0 ? '+' : '') + leadsChg + '% vs minggu lepas)' : ''),
+        'Spend: RM' + c.spend.toFixed(2) + (spendChg !== 'N/A' ? ' (' + (spendChg > 0 ? '+' : '') + spendChg + '% vs minggu lepas)' : ''),
+        'CPL: RM' + c.cpl.toFixed(2) + (cplAlert ? ' — ' + cplAlert : ''),
+        '',
+        '== MINGGU LEPAS (avg harian) ==',
+        'Leads/hari: ' + (prev.leads / 7).toFixed(1),
+        'Spend/hari: RM' + (prev.spend / 7).toFixed(2),
+        'CPL avg: RM' + prev.cpl.toFixed(2),
+        '',
+        '== TOP ADS (7 HARI) ==',
+        adSummary || '  (tiada data ad)',
+      ].join('\n');
+    }).join('\n\n---\n\n');
+
+    const systemMsg = [
+      'Kau adalah pakar Facebook Ads untuk agensi digital Malaysia yang handle klien niche home improvement (kabinet, carpentry, renovation, interior design, ACP, flooring, woodwork) dan travel (Umrah, pelancongan).',
+      '',
+      'CONTEXT KLIEN:',
+      '- Kabinet/carpentry Malaysia: buyer biasanya isteri umur 28-45, scroll FB/IG waktu lunch & malam. Hook terbaik: harga, before-after, tempahan terhad.',
+      '- Renovation/ID: decision maker suami+isteri, proses lama, perlu nurture. Lead quality lebih penting dari kuantiti.',
+      '- ACP/Awning: B2B mix B2C, peak season awal tahun & Raya.',
+      '- Woodwork: craftmanship & customization jadi USP.',
+      '- Travel Umrah/pelancongan: peak booking March-May & Oct-Nov. Lead messaging = niat tinggi.',
+      '',
+      'CARA ANALISIS:',
+      '- CPL spike 1 hari je = maybe normal, tapi kalau 3 hari berturut = masalah sebenar',
+      '- Ad dengan CTR tinggi tapi leads rendah = landing page/WA reply lambat',
+      '- Ad dengan leads tinggi tapi CPL mahal = scale tapi optimize targeting',
+      '- 0 leads + ada spend = creative dah fatigue atau audience saturated',
+      '- Hari Isnin-Rabu biasanya leads lebih tinggi untuk home improvement',
+      '',
+      'FORMAT OUTPUT:',
+      'JSON array sahaja: [{"name":"ClientName","insight":"...","alert":"...","action":"..."}]',
+      '- insight: analisis kenapa performance macam tu (2-3 ayat)',
+      '- alert: flag urgent kalau ada (CPL spike, 0 leads, creative fatigue) — kosongkan string kalau tiada',
+      '- action: 1-2 cadangan konkrit boleh buat harini',
+      'Bahasa Melayu. Nama klien mesti exact sama.',
+    ].join('\n');
 
     const body = {
       model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
+      max_tokens: 3000,
       system: systemMsg,
       messages: [{ role: 'user', content: prompt }],
     };
@@ -172,38 +259,21 @@ function getAllInsights(clientsData) {
       muteHttpExceptions: true,
     });
 
-    const raw = res.getContentText();
-    Logger.log('Claude raw response: ' + raw.substring(0, 500));
-
+    const raw  = res.getContentText();
     const json = JSON.parse(raw);
-    if (json.error) {
-      Logger.log('Claude API error: ' + JSON.stringify(json.error));
-      return {};
-    }
+    if (json.error) { Logger.log('Claude API error: ' + JSON.stringify(json.error)); return {}; }
 
     const textContent = json.content && json.content[0] && json.content[0].text;
-    if (!textContent) {
-      Logger.log('Claude returned no text content');
-      return {};
-    }
+    if (!textContent) return {};
 
-    Logger.log('Claude text: ' + textContent.substring(0, 500));
-
-    // Extract JSON array from response (Claude sometimes wraps in markdown)
     const match = textContent.match(/\[[\s\S]*\]/);
-    if (!match) {
-      Logger.log('No JSON array found in Claude response');
-      return {};
-    }
+    if (!match) { Logger.log('No JSON array in Claude response'); return {}; }
 
-    const arr = JSON.parse(match[0]);
+    const arr    = JSON.parse(match[0]);
     const result = {};
     arr.forEach(item => {
-      if (item.name && item.insight) {
-        result[item.name] = item.insight;
-      }
+      if (item.name) result[item.name] = item;
     });
-    Logger.log('Parsed insights for: ' + Object.keys(result).join(', '));
     return result;
   } catch (e) {
     Logger.log('getAllInsights error: ' + e.toString());
@@ -230,46 +300,57 @@ function dailyUpdate() {
 
   CLIENTS.forEach(c => {
     try {
-      const data  = fetchInsights(c.accountId, dateStr);
-      const leads = extractLeads(data, c.leadType);
-      const spend = data.reduce((sum, d) => {
+      const data     = fetchInsights(c.accountId, dateStr);
+      const leads    = extractLeads(data, c.leadType);
+      const spend    = data.reduce((sum, d) => {
         const name = (d.campaign_name || '').toUpperCase();
         if (!name.includes('CBO') && !name.includes('ABO')) return sum;
         return sum + parseFloat(d.spend || 0);
       }, 0);
-      const cpl    = leads > 0 ? spend / leads : 0;
-      const adData = get7DayAdData(c.accountId);
+      const cpl      = leads > 0 ? spend / leads : 0;
+      const adData   = get7DayAdData(c.accountId);
+      const prevWeek = getPrevWeekData(c.accountId, c.leadType);
 
       writeToSheet(c.tab, row, leads, parseFloat(cpl.toFixed(2)), parseFloat(spend.toFixed(2)));
-
-      clientsData.push({ name: c.name, niche: c.niche, leadType: c.leadType, leads, spend, cpl, adData });
+      clientsData.push({ name: c.name, niche: c.niche, leadType: c.leadType, leads, spend, cpl, adData, prevWeek });
       Logger.log(c.name + ': leads=' + leads + ' spend=' + spend.toFixed(2));
     } catch (e) {
       Logger.log('Error for ' + c.name + ': ' + e.toString());
-      clientsData.push({ name: c.name, niche: c.niche, leadType: c.leadType, leads: 0, spend: 0, cpl: 0, adData: [] });
+      clientsData.push({ name: c.name, niche: c.niche, leadType: c.leadType, leads: 0, spend: 0, cpl: 0, adData: [], prevWeek: { leads: 0, spend: 0, cpl: 0 } });
     }
   });
 
-  // Message 1: Data report
+  // Message 1: Data snapshot
   let dataMsg = '📊 DAILY REPORT — ' + dateLabel + '\n';
   dataMsg += '━━━━━━━━━━━━━━━━━━━━\n';
   clientsData.forEach(c => {
+    const prev     = c.prevWeek || { leads: 0, spend: 0, cpl: 0 };
+    const avgLeads = (prev.leads / 7).toFixed(1);
+    const leadsChg = prev.leads > 0 ? ((c.leads - prev.leads / 7) / (prev.leads / 7) * 100).toFixed(0) : null;
+    const arrow    = leadsChg === null ? '' : leadsChg > 0 ? ' ▲' + leadsChg + '%' : ' ▼' + Math.abs(leadsChg) + '%';
+    const alert    = getCplAlert(c.cpl, prev.cpl);
     dataMsg += '\n🏢 ' + c.name + '\n';
-    dataMsg += '  Leads: ' + c.leads + '\n';
-    dataMsg += '  CPL: RM' + c.cpl.toFixed(2) + '\n';
+    dataMsg += '  Leads: ' + c.leads + arrow + ' (avg/hari: ' + avgLeads + ')\n';
+    dataMsg += '  CPL: RM' + c.cpl.toFixed(2) + (alert ? ' ' + alert : '') + '\n';
     dataMsg += '  Spend: RM' + c.spend.toFixed(2) + '\n';
   });
   sendTelegram(dataMsg);
 
-  // Message 2: Insight & Strategy
+  // Message 2: AI Analysis
   const insights = getAllInsights(clientsData);
 
-  let insightMsg = '🧠 INSIGHT & STRATEGY — ' + dateLabel + '\n';
+  let insightMsg = '🧠 AI ANALYSIS — ' + dateLabel + '\n';
   insightMsg += '━━━━━━━━━━━━━━━━━━━━\n';
   clientsData.forEach(c => {
-    const insight = insights[c.name];
+    const item = insights[c.name];
     insightMsg += '\n🏢 ' + c.name + '\n';
-    insightMsg += (insight || 'Tiada insight tersedia.') + '\n';
+    if (item) {
+      if (item.alert) insightMsg += item.alert + '\n';
+      insightMsg += item.insight + '\n';
+      insightMsg += '→ ' + item.action + '\n';
+    } else {
+      insightMsg += 'Tiada insight tersedia.\n';
+    }
   });
   sendTelegram(insightMsg);
 
