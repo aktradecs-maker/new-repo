@@ -11,7 +11,7 @@ const CLIENTS = [
   { name: 'Wood Pastel', accountId: '2165911030654172',  tab: 'Wood Pastel', leadType: 'both',      niche: 'Woodwork & Carpentry' },
   { name: 'KMM',         accountId: '1271489521762437',  tab: 'KMM',         leadType: 'both',      niche: 'Kitchen Cabinet & Carpentry' },
   { name: 'Kidal',       accountId: '175545604370196',   tab: 'Kidal',       leadType: 'both',      niche: 'Interior Design Studio' },
-  // { name: 'Letto Ideas', accountId: 'PENDING',          tab: 'Letto Ideas', leadType: 'both',      niche: 'ID Reno' },
+  { name: 'Letto Ideas', accountId: '152985287666415',   tab: 'Letto Ideas', leadType: 'both',      niche: 'ID Reno' },
   // { name: 'Alkadapo',    accountId: '1976133606187254',  tab: 'Alkadapo',    leadType: 'messaging', niche: 'Kabinet Aluminium Modern' },
   // { name: 'MDC',         accountId: '1156797928642221',  tab: 'MDC',         leadType: 'form',      niche: 'Carpentry & Kabinet Dapur' },
   // { name: 'Infine',      accountId: '152985287666415',   tab: 'Infine',      leadType: 'form',      niche: 'Interior Design & Build' },
